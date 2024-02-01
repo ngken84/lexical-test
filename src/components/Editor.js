@@ -8,28 +8,14 @@ import {ContentEditable} from '@lexical/react/LexicalContentEditable';
 import {HistoryPlugin} from '@lexical/react/LexicalHistoryPlugin';
 import LexicalErrorBoundary from '@lexical/react/LexicalErrorBoundary';
 import {useLexicalComposerContext} from '@lexical/react/LexicalComposerContext'
-import {HeadingNode, $createHeadingNode} from '@lexical/rich-text';
-import { $createTextNode, $getRoot, $getSelection, $isRangeSelection } from 'lexical';
-import { $setBlocksType } from '@lexical/selection'
+import { InsertionTextNode, InsertionTextPlugin } from '../lexical-plugin/InsertionTextPlugin';
 
 
 const Editor = () => {
 
-    const MyHeadingButton = () => {
-        const [editor] = useLexicalComposerContext();
-        const onClick = (e) => {
-            editor.update(() => {
-                const selection = $getSelection();
-                console.log(selection);
-                if($isRangeSelection(selection)) {
-                    $setBlocksType(selection, () => $createHeadingNode('h1'))
-                }
-            });
-        }
-        return <button onClick={onClick}>Heading</button>
+    const theme = {
+        insertion: 'insertionText'
     }
-
-    const theme = {}
 
     const onError = (error) => {
         console.log(error);
@@ -40,7 +26,7 @@ const Editor = () => {
         theme,
         onError,
         nodes: [
-            HeadingNode
+            InsertionTextNode
         ]
     }
 
@@ -62,13 +48,12 @@ const Editor = () => {
     return (
         <>
         <LexicalComposer initialConfig={initialConfig}>
-            <MyHeadingButton/>
             <RichTextPlugin
                 contentEditable={<ContentEditable className="contentEditable"/>}
                 placeholder={<div>Enter some text...</div>}
                 ErrorBoundary={LexicalErrorBoundary}/>
             <HistoryPlugin/>
-            <MyHeadingButton/>
+            <InsertionTextPlugin/>
             <MyOnChangePlugin onChange={onChange}/>
         </LexicalComposer>
         </>
