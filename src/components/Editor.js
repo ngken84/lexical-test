@@ -8,7 +8,7 @@ import {ContentEditable} from '@lexical/react/LexicalContentEditable';
 import {HistoryPlugin} from '@lexical/react/LexicalHistoryPlugin';
 import LexicalErrorBoundary from '@lexical/react/LexicalErrorBoundary';
 import {useLexicalComposerContext} from '@lexical/react/LexicalComposerContext'
-import { InsertionTextNode, InsertionTextPlugin } from '../lexical-plugin/InsertionTextPlugin';
+import { InsertionTextNode, DeletionTextNode, TrackChangesPlugin } from '../lexical-plugin/TrackChangesPlugin';
 
 
 const Editor = () => {
@@ -26,7 +26,8 @@ const Editor = () => {
         theme,
         onError,
         nodes: [
-            InsertionTextNode
+            InsertionTextNode,
+            DeletionTextNode
         ]
     }
 
@@ -53,7 +54,7 @@ const Editor = () => {
                 placeholder={<div>Enter some text...</div>}
                 ErrorBoundary={LexicalErrorBoundary}/>
             <HistoryPlugin/>
-            <InsertionTextPlugin/>
+            <TrackChangesPlugin/>
             <MyOnChangePlugin onChange={onChange}/>
         </LexicalComposer>
         </>
