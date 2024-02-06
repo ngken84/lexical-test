@@ -1,10 +1,13 @@
-import { TextNode, createCommand, COMMAND_PRIORITY_LOW, $getSelection, $isRangeSelection, $getRoot, ParagraphNode, $isParagraphNode, $createRangeSelection, $setSelection  } from 'lexical';
+import { TextNode, createCommand, COMMAND_PRIORITY_LOW, $getSelection, $getNodeByKey, $isRangeSelection, $getRoot, ParagraphNode, $isParagraphNode, $createRangeSelection, $setSelection, $createTextNode  } from 'lexical';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
 import React, { useEffect, useRef } from 'react';
+import { findDeltaCharPositionInString, getSubstringInRange } from './TextTools';
+import { getAnchorOffsetFromEditor, getFocusOffsetFromEditor, isCollapsedSelectionInsert, getNodeByKey, getNodePositionInsideParent } from './EditorTools';
+import { getCollapsedSelection } from './SelectionTools';
 
 
-const TYPE_INSERTION = "insertionText";
-const TYPE_DELETION = "deletionText";
+export const TYPE_INSERTION = "insertionText";
+export const TYPE_DELETION = "deletionText";
 
 export class InsertionTextNode extends TextNode {
     
@@ -13,7 +16,7 @@ export class InsertionTextNode extends TextNode {
     }
 
     static getType() {
-        return "insertionText";
+        return TYPE_INSERTION;
     }
 
     static clone(node) {
@@ -47,7 +50,7 @@ export class DeletionTextNode extends TextNode {
     }
 
     static getType() {
-        return "deletionText";
+        return TYPE_DELETION;
     }
 
     static clone(node) {
@@ -90,82 +93,103 @@ export const TrackChangesPlugin = () => {
     }
 
     const nodeMap = useRef({});
-    const focusOffset = useRef();
-    const anchorOffset = useRef();
-
-    const isSingleCharacterEntry = (node) => {
-        if(node.__text.length === nodeMap.current[node.__key].text.length + 1) {
-            if(!focusOffset.current && !anchorOffset.current) {
-                return true;
-            }
-            if(focusOffset.current && anchorOffset.current && focusOffset.current.isEqual(anchorOffset.current)) {
-                return true;
-            }
-            return true;
-        }
-        return false;
-    }
-
-
+    const isTextInsertion = useRef(false);
 
     editor.registerNodeTransform(TextNode, (textNode) => {
+        if(isTextInsertion.current) {
+            isTextInsertion.current = false;
+            return;
+        }
+        console.log(nodeMap.current);
+        console.log('editor', editor);
+        const anchorOffset = getAnchorOffsetFromEditor(editor);
+        const focusOffset = getFocusOffsetFromEditor(editor);
+        console.log('anchor', anchorOffset);
+        console.log("focus", focusOffset);
         const currentNode = nodeMap.current[textNode.__key];
+        console.log(currentNode);
+        const collapsedSel = getCollapsedSelection(anchorOffset, focusOffset);
+        console.log("selection", collapsedSel);
         if(currentNode) {
-            console.log("here");
-            if(isSingleCharacterEntry(textNode)) {
-                if((!focusOffset.current && !anchorOffset.current) || focusOffset.current.offset === 0) {
-                    textNode.__text = currentNode.text
-                }
-                console.log("insert one character?")
-            }
-        } else {
-            const newNodeText = textNode.__text;
-            if(newNodeText.length > 0) {
-                textNode.__text = '';
-                editor.update(() => {
-                    const [paragraph] = $getRoot().getChildren();   
-                    
-                    if(!$isParagraphNode(paragraph)) {
-                        return;
+            // node exists in history
+            if(collapsedSel) {
+                // previous selection was a single selection
+                const change = isCollapsedSelectionInsert(currentNode.text, textNode.__text, collapsedSel.offset)
+                console.log(change);
+                if(change) {
+                    if(collapsedSel.offset !== 0) {
+                        textNode.__text = change.start;
+                        editor.update(() => {
+                            insertNewNodesPostSplit(textNode, change.newChar, change.end, false);
+                        });
                     }
-                    const textNode = $createInsertionTextNode(newNodeText);
-                    paragraph.append(textNode);
-                    const selection = $createRangeSelection();
-                    selection.anchor.key = textNode.__key;
-                    selection.anchor.offset = 1;
-                    selection.anchor.type = 'text';
-                    selection.focus.key = textNode.__key;
-                    selection.focus.offset = 1;
-                    selection.focus.type = 'text';
-                    console.log(selection);
-                    $setSelection(selection);
-                })
+                }
+                
             }
+        
         }
         nodeMap.current[textNode.__key] = new NodeState(textNode);
-        
-        
     });
 
+    const insertNewNodesPostSplit = (node, insertNodeText, postSplitText, isDeletion = false) => {
+        const parent = $getNodeByKey(node.__parent);
+        const newNode = $createInsertionTextNode(insertNodeText);
+        nodeMap.current[newNode.__key] = new NodeState(newNode);
+        if(postSplitText.length > 0) {
+            const newTextNode = isDeletion ? $createDeletionTextNode(postSplitText) : $createTextNode(postSplitText);
+            nodeMap.current[newTextNode.__key] = new NodeState(newTextNode);
+            parent.splice(getNodePositionInsideParent(parent, node.__key) + 1, 0, [newNode, newTextNode]);
+        } else {
+            parent.splice(getNodePositionInsideParent(parent, node.__key) + 1, 0, [newNode]);
+        }
+        const selection = $getSelection();
+        selection.anchor.key = newNode.__key
+        selection.anchor.offset = insertNodeText.length;
+        selection.focus.key = newNode.__key;
+        selection.focus.offset = insertNodeText.length;
+        $setSelection(selection);
+    }
+
     editor.registerNodeTransform(InsertionTextNode, (textNode) => {
+        console.log("insertion Text Node transform");
         nodeMap.current[textNode.__key] = new NodeState(textNode);
     });
 
     editor.registerNodeTransform(DeletionTextNode, (textNode) => {
-        if(nodeMap.current[textNode.__key]) {
-            console.log("here");
-            if(isSingleCharacterEntry(textNode)) {
-                textNode.__text = nodeMap.current[textNode.__key].text;
+        console.log(nodeMap.current);
+        console.log('editor', editor);
+        const anchorOffset = getAnchorOffsetFromEditor(editor);
+        const focusOffset = getFocusOffsetFromEditor(editor);
+        console.log('anchor', anchorOffset);
+        console.log("focus", focusOffset);
+        const currentNode = nodeMap.current[textNode.__key];
+        console.log(currentNode);
+        const collapsedSel = getCollapsedSelection(anchorOffset, focusOffset);
+        console.log("selection", collapsedSel);
+        if(currentNode) {
+            // node exists in history
+            if(collapsedSel) {
+                // previous selection was a single selection
+                const change = isCollapsedSelectionInsert(currentNode.text, textNode.__text, collapsedSel.offset)
+                console.log(change);
+                if(change) {
+                    if(collapsedSel.offset !== 0) {
+                        textNode.__text = change.start;
+                        editor.update(() => {
+                            insertNewNodesPostSplit(textNode, change.newChar, change.end, true);
+                        });
+                    }
+                }
+                
             }
+        
         }
         nodeMap.current[textNode.__key] = new NodeState(textNode);
     });
 
     useEffect(() => {
         return editor.registerUpdateListener(({editorState}) => {
-            anchorOffset.current = new SelState(editorState._selection.anchor)
-            focusOffset.current = new SelState(editorState._selection.focus);
-            console.log(anchorOffset.current);
+            console.log(editorState);
         });
         
     }, [editor]);
@@ -184,6 +208,21 @@ export const TrackChangesPlugin = () => {
         })
     }
 
+    const onClickText = () => {
+        editor.update(() => {
+            const [paragraph] = $getRoot().getChildren();
+            isTextInsertion.current = true;
+            if(!$isParagraphNode(paragraph)) {
+                return;
+            }
+            console.log("1")
+            const textNode = $createTextNode("arou");
+            console.log(textNode);
+            console.log("2");
+            paragraph.append(textNode);
+        })
+    }
+
     const onClickDelete = () => {
         editor.update(() => {
             const [paragraph] = $getRoot().getChildren();   
@@ -191,14 +230,14 @@ export const TrackChangesPlugin = () => {
             if(!$isParagraphNode(paragraph)) {
                 return;
             }
-            const textNode = $createDeletionTextNode("Hello World");
+            const textNode = $createDeletionTextNode("Champio");
             paragraph.append(textNode);
             
 
         })
     }
 
-    return <div><button onClick={onClick}>Insertion Text</button><button onClick={onClickDelete}>Delete</button></div>
+    return <div><button onClick={onClickText}>text</button><button onClick={onClick}>Insertion Text</button><button onClick={onClickDelete}>Delete</button></div>
     
 
 }
@@ -209,16 +248,5 @@ class NodeState {
         this.parent = node.__parent;
         this.type = node.__type;
         this.text = node.__text;
-    }
-}
-
-class SelState {
-    constructor(sel) {
-        this.key = sel.key;
-        this.offset = sel.offset;
-    }
-
-    isEqual(sel) {
-        return this.key === sel.key && this.offset === sel.offset
     }
 }
